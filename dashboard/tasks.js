@@ -5,7 +5,7 @@
  *   1. 📋 Por Sprint — agrupado por sprint → dia → wave (original)
  *   2. 📅 Por Dia — agrupado apenas por dia, multi-projeto, com detalhes
  *
- * Dados via API: /api/projects/<slug>/tasks + /api/projects/<slug>/sprints
+ * Dados via API: /api/plugins/ct2/projects/<slug>/tasks + /api/plugins/ct2/projects/<slug>/sprints
  *
  * @version 2.0.0
  */
@@ -70,7 +70,7 @@
         this.error = null;
         try {
           // Load projects list
-          const projRes = await fetch('/api/projects');
+          const projRes = await fetch('/api/plugins/ct2/projects');
           if (!projRes.ok) throw new Error('API indisponível (HTTP ' + projRes.status + ')');
           this.projects = await projRes.json();
 
@@ -82,8 +82,8 @@
           for (const proj of this.projects) {
             try {
               const [tasksRes, sprintsRes] = await Promise.all([
-                fetch('/api/projects/' + proj.slug + '/tasks?limit=2000'),
-                fetch('/api/projects/' + proj.slug + '/sprints'),
+                fetch('/api/plugins/ct2/projects/' + proj.slug + '/tasks?limit=2000'),
+                fetch('/api/plugins/ct2/projects/' + proj.slug + '/sprints'),
               ]);
               if (tasksRes.ok) {
                 const tasks = await tasksRes.json();
