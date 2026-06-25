@@ -9,7 +9,7 @@ Config do cliente MCP (ex.: ~/.codex ou Claude):
   {"mcpServers": {"control-tower-v2": {
      "command": "uv",
      "args": ["run", "python", "-m", "src.mcp_server"],
-     "cwd": "~/Dev/ct2-public"}}}
+     "cwd": "/Users/rafaelfae/Dev/control-tower-v2"}}}
 """
 
 import json
