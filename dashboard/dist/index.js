@@ -309,8 +309,8 @@
       var slug = projectSlug || t._project || t.project_slug || "";
       var taskNumber = t.task_number;
       if (!slug || !taskNumber) return;
-      // Abrir em nova aba com a página HTML de detalhe via proxy do dashboard
-      window.open(API + "/tasks/" + slug + "/" + taskNumber, "_blank");
+      // Abrir na mesma aba — botão "Voltar" na página retorna ao Dashboard
+      window.open(API + "/tasks/" + slug + "/" + taskNumber, "_self");
     }
 
     function openAuditDetail(a) {
