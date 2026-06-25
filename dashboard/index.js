@@ -6,7 +6,7 @@
  * 
  * Dependências: Alpine.js, Tailwind CDN (já carregados pelo dashboard)
  * 
- * @author Jasnah (via zai glm-5.2)
+ * @author CT2 Team
  * @version 1.0.0
  */
 

@@ -2,7 +2,7 @@
   "name": "ct2-scorecards",
   "version": "1.0.0",
   "description": "Scorecards de performance por agente — métricas de auditoria semanal para o CT2",
-  "author": "Jasnah (via zai glm-5.2)",
+  "author": "CT2 Team",
   "type": "frontend",
   "entry": "dist/index.js",
   "ct2": {
