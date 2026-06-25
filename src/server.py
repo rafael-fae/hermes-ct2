@@ -204,6 +204,9 @@ class ControlTowerHandler(BaseHTTPRequestHandler):
         if path == "/api/github-webhook":
             self._post_github_webhook()
             return
+        if path == "/api/kanban-callback":
+            self._post_kanban_callback()
+            return
         self._error(404, "endpoint não encontrado")
 
     def _post_event(self) -> None:
@@ -361,6 +364,210 @@ class ControlTowerHandler(BaseHTTPRequestHandler):
             "status": "ok", "event": event, "action": action,
             "task_id": task_id,
         })
+
+    def _post_kanban_callback(self) -> None:
+        """Recebe callback do Kanban Hermes quando uma task é concluída/auditada.
+
+        Atualiza status_execucao (✅), status (done), data_conclusao e,
+        se houver dados de auditoria, insere na tabela auditorias e
+        atualiza status_auditoria (👁).
+
+        Payload esperado (um ou dois eventos no mesmo JSON):
+        {
+          "event": "task_complete" | "task_audited",
+          "project_slug": "...",
+          "task_number": 103,
+          "agent": "Navani",
+          "commit_hash": "abc1234",
+          "audit": {                       # opcional, presente em task_audited
+            "veredito": "aprovado",
+            "auditor": "Dalinar",
+            "observacoes": "...",
+            "ressalva": "...",
+            "scope_creep": 0,
+            "task_file_ok": 1,
+            "indices_ok": 1,
+            "diff_hash": "...",
+            "audit_hash": "..."
+          }
+        }
+        """
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._error(400, "corpo da requisição é obrigatório")
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._error(400, "JSON inválido")
+            return
+
+        event = body.get("event")
+        if not event:
+            self._error(400, "campo 'event' é obrigatório")
+            return
+        if event not in ("task_complete", "task_audited"):
+            self._error(
+                400,
+                f"evento inválido: '{event}'. Use 'task_complete' ou 'task_audited'",
+            )
+            return
+
+        project_slug = body.get("project_slug")
+        task_number = body.get("task_number")
+        if not project_slug:
+            self._error(400, "campo 'project_slug' é obrigatório")
+            return
+        if not task_number:
+            self._error(400, "campo 'task_number' é obrigatório")
+            return
+        try:
+            task_number = int(task_number)
+        except (ValueError, TypeError):
+            self._error(400, "task_number deve ser um número inteiro")
+            return
+
+        commit_hash = body.get("commit_hash")
+        audit_data = body.get("audit") if event == "task_audited" else None
+
+        with closing(get_connection()) as conn:
+            # Look up project
+            project = get_project_by_slug(conn, project_slug)
+            if project is None:
+                self._error(404, f"projeto '{project_slug}' não encontrado")
+                return
+
+            # Look up task by project_id + task_number
+            task = conn.execute(
+                "SELECT * FROM tasks WHERE project_id = ? AND task_number = ?",
+                (project["id"], task_number),
+            ).fetchone()
+            if task is None:
+                self._error(
+                    404,
+                    f"task {task_number} não encontrada no projeto '{project_slug}'",
+                )
+                return
+
+            updates = {}
+            params_update: list[Any] = []
+
+            if event == "task_complete":
+                updates["status_execucao"] = "✅"
+                updates["status"] = "done"
+                updates["data_conclusao"] = "date('now')"
+                if commit_hash:
+                    updates["commit_hash"] = commit_hash
+
+            if event == "task_audited":
+                updates["status_auditoria"] = "👁"
+                # Build audit insert
+                auditor = (
+                    audit_data.get("auditor") or "Dalinar"
+                    if audit_data
+                    else "Dalinar"
+                )
+                veredito = (
+                    audit_data.get("veredito") or "aprovado"
+                    if audit_data
+                    else "aprovado"
+                )
+                if veredito not in ("aprovado", "aprovado_ressalva", "rejeitado"):
+                    self._error(
+                        400,
+                        f"veredito inválido: '{veredito}'. "
+                        "Use 'aprovado', 'aprovado_ressalva' ou 'rejeitado'",
+                    )
+                    return
+
+                fallback_diff = hashlib.sha256(
+                    f"{task['id']}-{datetime.now(timezone.utc).isoformat()}".encode()
+                ).hexdigest()[:16]
+                diff_hash = (
+                    audit_data.get("diff_hash") or fallback_diff
+                    if audit_data
+                    else fallback_diff
+                )
+                fallback_audit = hashlib.sha256(
+                    f"audit-{task['id']}-{diff_hash}-{datetime.now(timezone.utc).isoformat()}".encode()
+                ).hexdigest()[:16]
+                audit_hash_val = (
+                    audit_data.get("audit_hash") or fallback_audit
+                    if audit_data
+                    else fallback_audit
+                )
+
+                scope_creep = audit_data.get("scope_creep", 0) if audit_data else 0
+                task_file_ok = audit_data.get("task_file_ok", 0) if audit_data else 0
+                indices_ok = audit_data.get("indices_ok", 0) if audit_data else 0
+                ressalva = audit_data.get("ressalva") if audit_data else None
+                observacoes = audit_data.get("observacoes") if audit_data else None
+
+                # Check for duplicate audit
+                existing_audit = conn.execute(
+                    "SELECT id FROM auditorias WHERE task_id = ? AND audit_hash = ?",
+                    (task["id"], audit_hash_val),
+                ).fetchone()
+                if existing_audit:
+                    self._send_json(
+                        200,
+                        {
+                            "status": "ok",
+                            "event": event,
+                            "task_id": task["id"],
+                            "duplicate": True,
+                            "message": "auditoria já registrada para esta task",
+                        },
+                    )
+                    return
+
+                conn.execute(
+                    "INSERT INTO auditorias "
+                    "(task_id, auditor, veredito, ressalva, scope_creep, "
+                    "task_file_ok, indices_ok, diff_hash, audit_hash, observacoes) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        task["id"],
+                        auditor,
+                        veredito,
+                        ressalva,
+                        int(scope_creep),
+                        int(task_file_ok),
+                        int(indices_ok),
+                        diff_hash,
+                        audit_hash_val,
+                        observacoes,
+                    ),
+                )
+
+            # Apply updates to tasks table
+            if updates:
+                set_clause = ", ".join(
+                    f"{col} = {val}" if "(" in val else f"{col} = ?"
+                    for col, val in updates.items()
+                )
+                params_update = [
+                    v for v in updates.values() if "(" not in v
+                ] + [task["id"]]
+                conn.execute(
+                    f"UPDATE tasks SET {set_clause}, "
+                    f"updated_at = datetime('now') "
+                    f"WHERE id = ?",
+                    params_update,
+                )
+
+            conn.commit()
+
+        self._send_json(
+            200,
+            {
+                "status": "ok",
+                "event": event,
+                "task_id": task["id"],
+                "task_number": task_number,
+                "project_slug": project_slug,
+            },
+        )
 
     do_PUT = do_POST
     do_PATCH = do_POST

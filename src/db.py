@@ -151,11 +151,11 @@ CREATE TABLE IF NOT EXISTS version_history (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Auditorias (do DIARIO.md do Orchestrator)
+-- Auditorias (do DIARIO.md do Dalinar)
 CREATE TABLE IF NOT EXISTS auditorias (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER NOT NULL REFERENCES tasks(id),
-    auditor TEXT NOT NULL DEFAULT 'Orchestrator',
+    auditor TEXT NOT NULL DEFAULT 'Dalinar',
     veredito TEXT NOT NULL CHECK (veredito IN ('aprovado', 'aprovado_ressalva', 'rejeitado')),
     ressalva TEXT,
     scope_creep INTEGER NOT NULL DEFAULT 0,
@@ -557,7 +557,7 @@ def seed_agents(conn=None, db_path=None):
     """Insere os 6 agentes fixos no banco (seed fixo).
 
     Substitui a dependência do ESTADO-DA-EQUIPE.md para popular agent_status.
-    Os agentes são fixos: Orchestrator, Agent-Product, Agent-DevOps, Agent-Backend, Agent-Vault, Agent-Frontend.
+    Os agentes são fixos: Dalinar, Jasnah, Kaladin, Navani, Pattern, Shallan.
 
     Args:
         conn:    Optional SQLite connection. Se não fornecido, abre um.
@@ -573,12 +573,12 @@ def seed_agents(conn=None, db_path=None):
         should_close = False
 
     agents = [
-        ("Orchestrator", "idle", "DeepSeek V4 Flash", ""),
-        ("Agent-Product", "idle", "zai glm-5.2", ""),
-        ("Agent-DevOps", "idle", "agy Gemini 3.5 Flash", ""),
-        ("Agent-Backend", "idle", "Codex gpt-5.5", ""),
-        ("Agent-Vault", "idle", "agy Gemini 3.5 Flash", ""),
-        ("Agent-Frontend", "idle", "Opus 4.7", ""),
+        ("Dalinar", "idle", "DeepSeek V4 Flash", ""),
+        ("Jasnah", "idle", "zai glm-5.2", ""),
+        ("Kaladin", "idle", "agy Gemini 3.5 Flash", ""),
+        ("Navani", "idle", "Codex gpt-5.5", ""),
+        ("Pattern", "idle", "agy Gemini 3.5 Flash", ""),
+        ("Shallan", "idle", "Opus 4.7", ""),
     ]
 
     count = 0
@@ -677,7 +677,7 @@ def dedup_auditorias(conn):
 def relink_orphan_auditorias(conn):
     """Relinks auditorias with orphan task_ids (where task_id uses task_number
     instead of the actual tasks.id). Matches by task_number with project priority:
-    CT V2 (1) > example-project (5) > agent-ops-workflow (3).
+    CT V2 (1) > oeste-gestao (5) > agent-ops-workflow (3).
     Returns list of (audit_id, old_task_id, new_task_id) for relinked rows.
     """
     orphans = conn.execute("""
@@ -723,10 +723,10 @@ def get_scorecards(conn, days=7, agent=None):
     Retorna scorecards de performance por agente para o endpoint GET /api/scorecards.
 
     Métricas calculadas a partir de tasks e auditorias existentes.
-    Agrupa agentes por prefixo (agent LIKE 'Agent-Product%' → 'Agent-Product') para
-    normalizar nomes inconsistentes como 'Agent-Product (via delegate_task)'.
+    Agrupa agentes por prefixo (agent LIKE 'Jasnah%' → 'Jasnah') para
+    normalizar nomes inconsistentes como 'Jasnah (via delegate_task)'.
     """
-    CORE_AGENTS = ['Orchestrator', 'Agent-Product', 'Agent-DevOps', 'Agent-Backend', 'Agent-Vault', 'Agent-Frontend']
+    CORE_AGENTS = ['Dalinar', 'Jasnah', 'Kaladin', 'Navani', 'Pattern', 'Shallan']
 
     if agent:
         CORE_AGENTS = [a for a in CORE_AGENTS if a.lower() == agent.lower()]
