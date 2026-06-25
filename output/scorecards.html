@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="pt-BR" x-data="scorecards()" x-init="init()" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Scorecards — CT V2</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        primary: { 50:'#f0fdfa',100:'#ccfbf1',200:'#99f6e4',300:'#5eead4',400:'#2dd4bf',500:'#14b8a6',600:'#0d9488',700:'#0f766e',800:'#115e59',900:'#134e4a',950:'#042f2e' },
+        neutral: { 50:'#f8fafc',100:'#f1f5f9',200:'#e2e8f0',300:'#cbd5e1',400:'#94a3b8',500:'#64748b',600:'#475569',700:'#334155',800:'#1e293b',900:'#0f172a',950:'#020617' },
+        success: { 400:'#34d399',500:'#10b981',600:'#059669',700:'#047857' },
+        warning: { 400:'#fbbf24',500:'#f59e0b',600:'#d97706' },
+        danger: { 400:'#f87171',500:'#ef4444',600:'#dc2626' },
+        info: { 400:'#60a5fa',500:'#3b82f6',600:'#2563eb' },
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+      },
+      boxShadow: {
+        'glow': '0 0 20px rgba(13,148,136,0.15)',
+        'card': '0 1px 3px 0 rgb(15 23 42 / 0.3), 0 1px 2px -1px rgb(15 23 42 / 0.2)',
+      },
+    }
+  }
+}
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+body { background: #0f172a; }
+.sortable { cursor: pointer; user-select: none; }
+.sortable:hover { color: #2dd4bf; }
+.loading-dots::after { content: '...'; animation: dots 1.5s steps(4, end) infinite; }
+@keyframes dots { 0%,20% { content: '.'; } 40% { content: '..'; } 60%,100% { content: '...'; } }
+</style>
+</head>
+<body class="bg-neutral-900 text-neutral-100 font-sans antialiased min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-sm sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">📊</span>
+          <h1 class="text-xl font-bold text-white tracking-tight">Scorecards</h1>
+          <span class="text-sm text-neutral-500">CT V2</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <!-- Period selector -->
+          <div class="flex bg-neutral-800 rounded-lg p-1 gap-1">
+            <template x-for="d in [7, 14, 30]" :key="d">
+              <button @click="days = d; fetchScorecards()"
+                      :class="days === d ? 'bg-primary-600 text-white shadow-sm' : 'text-neutral-400 hover:text-white'"
+                      class="px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-150"
+                      x-text="d + 'd'">
+              </button>
+            </template>
+          </div>
+          <!-- Agent filter -->
+          <select x-model="agentFilter" @change="fetchScorecards()"
+                  class="bg-neutral-800 border border-neutral-700 text-neutral-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            <option value="">Todos os agentes</option>
+            <template x-for="a in agents" :key="a">
+              <option :value="a" x-text="a"></option>
+            </template>
+          </select>
+          <!-- Refresh -->
+          <button @click="fetchScorecards()"
+                  class="p-2 text-neutral-400 hover:text-primary-400 hover:bg-neutral-800 rounded-lg transition-all">
+            <svg class="w-5 h-5" :class="{'animate-spin': loading}"
+                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Summary cards row -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8" x-show="!loading && data.length > 0">
+      <template x-for="stat in summaryStats" :key="stat.label">
+        <div class="bg-neutral-800/50 rounded-xl border border-neutral-700/50 p-4">
+          <div class="text-xs text-neutral-500 uppercase tracking-wider font-medium" x-text="stat.label"></div>
+          <div class="text-2xl font-bold text-white mt-1" x-text="stat.value"></div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Loading state -->
+    <div x-show="loading" class="flex items-center justify-center py-32">
+      <div class="text-center">
+        <div class="text-4xl mb-4 animate-pulse">📊</div>
+        <div class="text-neutral-400 text-lg">
+          Carregando scorecards<span class="loading-dots"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error state -->
+    <div x-show="error" class="flex items-center justify-center py-32">
+      <div class="text-center">
+        <div class="text-4xl mb-4">⚠️</div>
+        <div class="text-danger-400 text-lg" x-text="error"></div>
+        <button @click="fetchScorecards()" class="mt-4 px-4 py-2 bg-neutral-800 rounded-lg text-sm hover:bg-neutral-700 transition-all">
+          Tentar novamente
+        </button>
+      </div>
+    </div>
+
+    <!-- Scorecards table -->
+    <div x-show="!loading && !error" class="bg-neutral-800/30 rounded-xl border border-neutral-700/50 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-neutral-700/50 bg-neutral-800/50">
+              <th @click="sortBy('agent')" class="sortable px-4 py-3 text-left text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Agente <span x-text="sortArrow('agent')" class="text-primary-400"></span>
+              </th>
+              <th @click="sortBy('first_pass_rate')" class="sortable px-4 py-3 text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                1ª Auditoria <span x-text="sortArrow('first_pass_rate')" class="text-primary-400"></span>
+              </th>
+              <th @click="sortBy('rework_count')" class="sortable px-4 py-3 text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Rework <span x-text="sortArrow('rework_count')" class="text-primary-400"></span>
+              </th>
+              <th @click="sortBy('scope_creep')" class="sortable px-4 py-3 text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Scope Creep <span x-text="sortArrow('scope_creep')" class="text-primary-400"></span>
+              </th>
+              <th @click="sortBy('avg_time_to_done_hours')" class="sortable px-4 py-3 text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Tempo Médio <span x-text="sortArrow('avg_time_to_done_hours')" class="text-primary-400"></span>
+              </th>
+              <th @click="sortBy('volume')" class="sortable px-4 py-3 text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Volume <span x-text="sortArrow('volume')" class="text-primary-400"></span>
+              </th>
+              <th @click="sortBy('total_tasks')" class="sortable px-4 py-3 text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Total Tasks <span x-text="sortArrow('total_tasks')" class="text-primary-400"></span>
+              </th>
+              <th @click="sortBy('audited_tasks')" class="sortable px-4 py-3 text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Auditadas <span x-text="sortArrow('audited_tasks')" class="text-primary-400"></span>
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-700/30">
+            <template x-for="row in sortedData" :key="row.agent">
+              <tr class="hover:bg-neutral-700/20 transition-colors">
+                <td class="px-4 py-3 font-medium text-white">
+                  <div class="flex items-center gap-2">
+                    <span :class="agentColor(row.agent)" class="w-2 h-2 rounded-full inline-block"></span>
+                    <span x-text="row.agent"></span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-right font-mono text-sm">
+                  <span :class="rateColor(row.first_pass_rate)" x-text="row.first_pass_rate + '%'"></span>
+                  <span class="text-neutral-600 text-xs ml-1" x-text="'(' + row.audited_tasks + ')'"></span>
+                </td>
+                <td class="px-4 py-3 text-right font-mono">
+                  <span :class="row.rework_count > 0 ? 'text-warning-400' : 'text-neutral-500'" x-text="row.rework_count"></span>
+                </td>
+                <td class="px-4 py-3 text-right font-mono">
+                  <span :class="row.scope_creep > 0 ? 'text-danger-400' : 'text-neutral-500'" x-text="row.scope_creep"></span>
+                </td>
+                <td class="px-4 py-3 text-right font-mono text-neutral-300">
+                  <span x-show="row.avg_time_to_done_hours !== null" x-text="row.avg_time_to_done_hours + 'h'"></span>
+                  <span x-show="row.avg_time_to_done_hours === null" class="text-neutral-600">—</span>
+                </td>
+                <td class="px-4 py-3 text-right font-mono text-neutral-300" x-text="row.volume"></td>
+                <td class="px-4 py-3 text-right font-mono text-neutral-300" x-text="row.total_tasks"></td>
+                <td class="px-4 py-3 text-right font-mono text-neutral-300" x-text="row.audited_tasks"></td>
+              </tr>
+            </template>
+            <!-- Empty state -->
+            <tr x-show="sortedData.length === 0">
+              <td colspan="8" class="px-4 py-12 text-center text-neutral-500">
+                Nenhum dado encontrado para o período selecionado
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="mt-6 text-center text-xs text-neutral-700">
+      Dados atualizados ao carregar · Período <span x-text="days"></span> dias
+    </div>
+  </main>
+
+<script>
+function scorecards() {
+  return {
+    data: [],
+    loading: true,
+    error: null,
+    days: 7,
+    agentFilter: '',
+    sortField: 'volume',
+    sortDir: 'desc',
+    agents: [],
+
+    async init() {
+      await this.fetchScorecards();
+    },
+
+    async fetchScorecards() {
+      this.loading = true;
+      this.error = null;
+      try {
+        const url = '/api/scorecards?days=' + this.days;
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.error || 'Erro ' + resp.status);
+        }
+        this.data = await resp.json();
+
+        // Extract unique agent names for filter dropdown
+        const unique = [...new Set(this.data.map(d => d.agent))];
+        unique.sort();
+        this.agents = unique;
+
+      } catch (e) {
+        this.error = e.message || 'Falha ao carregar scorecards';
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    get sortedData() {
+      const filtered = this.agentFilter
+        ? this.data.filter(d => d.agent === this.agentFilter)
+        : this.data;
+      
+      return [...filtered].sort((a, b) => {
+        let va = a[this.sortField];
+        let vb = b[this.sortField];
+        if (va === null || va === undefined) va = -999999;
+        if (vb === null || vb === undefined) vb = -999999;
+        if (typeof va === 'string') va = va.toLowerCase();
+        if (typeof vb === 'string') vb = vb.toLowerCase();
+        if (va < vb) return this.sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return this.sortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+    },
+
+    sortBy(field) {
+      if (this.sortField === field) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortField = field;
+        this.sortDir = 'desc';
+      }
+    },
+
+    sortArrow(field) {
+      if (this.sortField !== field) return '';
+      return this.sortDir === 'asc' ? ' ▲' : ' ▼';
+    },
+
+    get summaryStats() {
+      if (this.data.length === 0) return [];
+      return [
+        { label: 'Agentes', value: this.data.length },
+        { label: 'Total Tasks', value: this.data.reduce((s, r) => s + r.total_tasks, 0) },
+        { label: 'Volume (7d)', value: this.data.reduce((s, r) => s + r.volume, 0) },
+        { label: 'Scope Creep', value: this.data.reduce((s, r) => s + r.scope_creep, 0) },
+      ];
+    },
+
+    agentColor(agent) {
+      const colors = {
+        'Orchestrator': 'bg-blue-400',
+        'Agent-Product': 'bg-purple-400',
+        'Agent-DevOps': 'bg-emerald-400',
+        'Agent-Backend': 'bg-amber-400',
+        'Agent-Vault': 'bg-pink-400',
+        'Agent-Frontend': 'bg-cyan-400',
+      };
+      return colors[agent] || 'bg-neutral-400';
+    },
+
+    rateColor(rate) {
+      if (rate >= 100) return 'text-success-400';
+      if (rate >= 80) return 'text-primary-400';
+      if (rate >= 50) return 'text-warning-400';
+      return 'text-danger-400';
+    },
+  }
+}
+</script>
+</body>
+</html>
