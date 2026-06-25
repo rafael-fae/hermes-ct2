@@ -629,6 +629,17 @@ class ControlTowerHandler(BaseHTTPRequestHandler):
         if path == "/scorecards":
             self._serve_html("scorecards.html")
             return
+        if len(parts) == 3 and parts[0] == "tasks":
+            slug = parts[1]
+            try: task_num = int(parts[2])
+            except ValueError: raise ValueError("task_number inválido")
+            self._task_html(slug, task_num)
+            return
+        if len(parts) == 2 and parts[0] == "auditorias":
+            try: audit_id = int(parts[1])
+            except ValueError: raise ValueError("auditoria id inválido")
+            self._audit_html(audit_id)
+            return
 
         self._error(404, "endpoint não encontrado")
 
@@ -747,7 +758,7 @@ class ControlTowerHandler(BaseHTTPRequestHandler):
             LEFT JOIN sprints s ON s.id = t.sprint_id
             LEFT JOIN waves w ON w.id = t.wave_id
             WHERE {' AND '.join(clauses)}
-            ORDER BY t.created_at DESC, t.id DESC
+            ORDER BY t.task_number DESC
         """
         if limit is not None:
             sql += " LIMIT ?"
@@ -896,6 +907,181 @@ class ControlTowerHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(content)
         print(f"GET /{filename} → 200", flush=True)
+
+    @staticmethod
+    def _esc(s: str) -> str:
+        """Escape HTML entities."""
+        if s is None:
+            return "N/A"
+        return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _task_html(self, slug: str, task_number: int) -> None:
+        """Página HTML com detalhamento completo da task em markdown."""
+        with closing(get_connection()) as conn:
+            project = get_project_by_slug(conn, slug)
+            if project is None:
+                self._error(404, f"projeto '{slug}' não encontrado")
+                return
+            task = conn.execute(
+                """SELECT t.*, s.title AS sprint_name, s.number AS sprint_number,
+                          w.wave_number
+                   FROM tasks t
+                   LEFT JOIN sprints s ON s.id = t.sprint_id
+                   LEFT JOIN waves w ON w.id = t.wave_id
+                   WHERE t.project_id = ? AND t.task_number = ?""",
+                (project["id"], task_number),
+            ).fetchone()
+            if task is None:
+                self._error(404, f"task {task_number} não encontrada")
+                return
+
+            audits = conn.execute(
+                "SELECT * FROM auditorias WHERE task_id = ? ORDER BY created_at DESC",
+                (task["id"],),
+            ).fetchall()
+
+        # Converter para dict para acesso com .get()
+        task = dict(task)
+        # Ler conteúdo markdown
+        task_file = task["task_file"] or f"task_{task['task_number']}"
+        if not task_file.endswith(".md"):
+            task_file += ".md"
+        day = task["day"] or ""
+        sprint_num = task["sprint_number"]
+        md_content = ""
+        possible_paths = [
+            os.path.join(project["path"], "planejamento-diario", f"sprint-{sprint_num}", str(day), task_file) if sprint_num and day else None,
+            os.path.join(project["path"], "planejamento-diario", str(day), task_file) if day else None,
+            os.path.join(project["path"], "planejamento-diario", task_file),
+        ]
+        for p in possible_paths:
+            if p and os.path.isfile(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    md_content = f.read()
+                break
+
+        # HTML com markdown básico
+        # Converter \\n para <br> e preservar estrutura básica
+        md_escaped = md_content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        html_body = f"<pre style=\"white-space:pre-wrap;font-family:monospace;padding:1rem;background:#0d1117;color:#c9d1d9;border-radius:8px;line-height:1.6\">{md_escaped}</pre>"
+
+        audit_html = ""
+        for a in audits:
+            a_dict = dict(a)
+            veredito_emoji = {"aprovado": "✅", "aprovado_ressalva": "⚠️", "rejeitado": "❌"}.get(a_dict.get("veredito", ""), "")
+            audit_html += f"""
+            <div style="margin:8px 0;padding:8px;background:#161b22;border-radius:5px;border-left:3px solid #58a6ff">
+              <strong>{veredito_emoji} {a_dict.get('veredito','').upper()}</strong> —
+              Auditor: {self._esc(a_dict.get('auditor'))} —
+              Hash: <code>{self._esc(a_dict.get('audit_hash'))}</code>
+              {f"<br>Ressalva: {self._esc(a_dict['ressalva'])}" if a_dict.get('ressalva') else ""}
+              {f"<br>Obs: {self._esc(a_dict['observacoes'])}" if a_dict.get('observacoes') else ""}
+            </div>"""
+
+        page = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task {task_number} — {self._esc(task['title'])}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 1.5rem; }}
+  h1 {{ font-size: 1.4rem; margin-bottom: .5rem; }}
+  .meta {{ display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; font-size: 0.85rem; color: #8b949e; }}
+  .badge {{ background: #21262d; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; }}
+  a {{ color: #58a6ff; text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  .back {{ display: inline-block; margin-bottom: 1rem; }}
+</style>
+</head>
+<body>
+<a class="back" href="javascript:history.back()">← Voltar</a>
+<h1>📋 Task {task_number} — {self._esc(task['title'])}</h1>
+<div class="meta">
+  <span class="badge">Status: {self._esc(task['status'])}</span>
+  <span class="badge">Agente: {self._esc(task.get('agent'))}</span>
+  <span class="badge">Motor: {self._esc(task.get('motor'))}</span>
+  <span class="badge">Conclusão: {self._esc(task.get('data_conclusao'))}</span>
+  <span class="badge">Sprint: {task.get('sprint_number','N/A')}</span>
+  {f"<span class=\"badge\">Commit: <code>{self._esc(task.get('commit_hash'))}</code></span>" if task.get('commit_hash') else ""}
+</div>
+<h2>📄 Markdown</h2>
+{html_body}
+<h2>🔍 Auditorias ({len(audits)})</h2>
+{audit_html if audits else '<p style="color:#8b949e">Nenhuma auditoria registrada.</p>'}
+</body>
+</html>"""
+        body = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _audit_html(self, audit_id: int) -> None:
+        """Página HTML com detalhes da auditoria."""
+        with closing(get_connection()) as conn:
+            audit = conn.execute(
+                """SELECT a.*, t.title AS task_title, t.task_number, t.project_slug
+                   FROM auditorias a
+                   JOIN tasks t ON t.id = a.task_id
+                   WHERE a.id = ?""",
+                (audit_id,),
+            ).fetchone()
+            if audit is None:
+                self._error(404, f"auditoria {audit_id} não encontrada")
+                return
+
+        a = dict(audit)
+        veredito_emoji = {"aprovado": "✅", "aprovado_ressalva": "⚠️", "rejeitado": "❌"}.get(a.get("veredito", ""), "")
+        page = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auditoria #{audit_id} — Task {a['task_number']}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 1.5rem; }}
+  h1 {{ font-size: 1.3rem; margin-bottom: .5rem; }}
+  .meta {{ display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; font-size: 0.85rem; color: #8b949e; }}
+  .badge {{ background: #21262d; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; }}
+  a {{ color: #58a6ff; text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  .back {{ display: inline-block; margin-bottom: 1rem; }}
+  .card {{ background: #161b22; padding: 1rem; border-radius: 8px; margin: 1rem 0; }}
+  code {{ background: #30363d; padding: 1px 4px; border-radius: 3px; font-size: 0.85rem; }}
+</style>
+</head>
+<body>
+<a class="back" href="javascript:history.back()">← Voltar</a>
+<h1>{veredito_emoji} Auditoria #{audit_id} — Task {a['task_number']}</h1>
+<div class="meta">
+  <span class="badge">Task: <a href="/tasks/{a.get('project_slug','')}/{a['task_number']}">{a['task_number']} — {self._esc(a.get('task_title'))}</a></span>
+  <span class="badge">Veredito: {self._esc(a.get('veredito','N/A').upper())}</span>
+  <span class="badge">Auditor: {self._esc(a.get('auditor'))}</span>
+  <span class="badge">Data: {self._esc(a.get('created_at'))}</span>
+</div>
+<div class="card">
+  <p><strong>✅ Task file ok:</strong> {"Sim" if a.get('task_file_ok') else "Não"}</p>
+  <p><strong>✅ Índices ok:</strong> {"Sim" if a.get('indices_ok') else "Não"}</p>
+  <p><strong>⚠️ Scope creep:</strong> {a.get('scope_creep',0)}</p>
+  <p><strong>Diff hash:</strong> <code>{self._esc(a.get('diff_hash'))}</code></p>
+  <p><strong>Audit hash:</strong> <code>{self._esc(a.get('audit_hash'))}</code></p>
+  {f"<p><strong>Ressalva:</strong> {self._esc(a['ressalva'])}</p>" if a.get('ressalva') else ""}
+  {f"<p><strong>Observações:</strong> {self._esc(a['observacoes'])}</p>" if a.get('observacoes') else ""}
+</div>
+</body>
+</html>"""
+        body = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _scorecards(self, query):
         days = _positive_int(query, "days", 7)

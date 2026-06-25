@@ -1,18 +1,14 @@
 {
-  "name": "ct2-scorecards",
+  "name": "ct2",
+  "label": "Control Tower",
+  "description": "Control Tower V2 — project governance, task tracking, and audit timeline",
+  "icon": "LayoutDashboard",
   "version": "1.0.0",
-  "description": "Scorecards de performance por agente — métricas de auditoria semanal para o CT2",
-  "author": "CT2 Team",
-  "type": "frontend",
-  "entry": "dist/index.js",
-  "ct2": {
-    "tab": "Scorecards",
-    "tab_icon": "📊",
-    "url": "/scorecards",
-    "sort_order": 4,
-    "requires": ["ct2-server"]
+  "tab": {
+    "path": "/ct2",
+    "position": "end"
   },
-  "hooks": {
-    "on_nav": "registerScorecardsTab"
-  }
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
 }
