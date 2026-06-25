@@ -605,6 +605,15 @@ class ControlTowerHandler(BaseHTTPRequestHandler):
             if resource == "auditorias":
                 self._project_audits(slug, query)
                 return
+        if len(parts) == 6 and parts[:2] == ["api", "projects"] and parts[4] == "tasks":
+            slug = parts[2]
+            try:
+                task_id = int(parts[3])
+            except ValueError:
+                raise ValueError("id da task deve ser um número inteiro")
+            if parts[5] == "md":
+                self._task_markdown(slug, task_id)
+                return
         if len(parts) == 3 and parts[:2] == ["api", "tasks"]:
             try:
                 task_id = int(parts[2])
@@ -622,6 +631,73 @@ class ControlTowerHandler(BaseHTTPRequestHandler):
             return
 
         self._error(404, "endpoint não encontrado")
+
+    def _task_markdown(self, slug: str, task_id: int) -> None:
+        """Serve o conteúdo markdown do arquivo task_XX.md."""
+        with closing(get_connection()) as conn:
+            project = get_project_by_slug(conn, slug)
+            if project is None:
+                self._error(404, f"projeto '{slug}' não encontrado")
+                return
+
+            task = conn.execute(
+                "SELECT t.*, s.number AS sprint_number FROM tasks t "
+                "LEFT JOIN sprints s ON s.id = t.sprint_id "
+                "WHERE t.project_id = ? AND t.id = ?",
+                (project["id"], task_id),
+            ).fetchone()
+            if task is None:
+                self._error(404, f"task {task_id} não encontrada")
+                return
+
+            task_file = task["task_file"] or f"task_{task['task_number']}"
+            if not task_file.endswith(".md"):
+                task_file += ".md"
+            day = task["day"] or ""
+
+            # Build path: <project_path>/planejamento-diario/sprint-<N>/<day>/<file>
+            base = project["path"]
+            sprint_num = task["sprint_number"]
+            possible_paths = []
+            if sprint_num and day:
+                possible_paths.append(
+                    os.path.join(base, "planejamento-diario", f"sprint-{sprint_num}", str(day), task_file)
+                )
+            if day:
+                possible_paths.append(
+                    os.path.join(base, "planejamento-diario", str(day), task_file)
+                )
+            # Fallback: search
+            possible_paths.append(
+                os.path.join(base, "planejamento-diario", task_file)
+            )
+
+            found = None
+            for p in possible_paths:
+                expanded = os.path.expanduser(p)
+                if os.path.isfile(expanded):
+                    found = expanded
+                    break
+
+            if not found:
+                self._error(404, f"arquivo não encontrado: {task_file}")
+                return
+
+            try:
+                with open(found, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except (IOError, OSError) as exc:
+                self._error(500, f"erro ao ler arquivo: {exc}")
+                return
+
+        self._send_json(200, {
+            "task_id": task["id"],
+            "task_number": task["task_number"],
+            "title": task["title"],
+            "file": task_file,
+            "path": found,
+            "content": content,
+        })
 
     def _projects(self) -> None:
         with closing(get_connection()) as conn:
