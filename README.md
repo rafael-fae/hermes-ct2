@@ -1,5 +1,7 @@
 # CT2 — Control Tower para Equipes Hermes Agent
 
+> **🧩 Template para seu projeto pessoal.** Este repositório contém o código-fonte do CT2 com banco de dados limpo (apenas schema, sem dados). Clone, configure para seu projeto, e comece do zero seguindo o workflow de equipe multi-agente.
+
 Servidor API REST que centraliza o workflow de equipes multi-agente. Funciona como **plugin nativo do Hermes Dashboard**, substituindo planilhas e arquivos soltos por um sistema integrado de projetos, tasks, auditorias e scorecards.
 
 ## O que o CT2 faz
@@ -10,7 +12,7 @@ Servidor API REST que centraliza o workflow de equipes multi-agente. Funciona co
 | **📄 Página de Detalhe** | Ao clicar em qualquer task, abre página HTML com markdown completo + metadados + auditorias |
 | **🔍 Auditorias nas Tasks** | Cada task mostra suas auditorias na própria página de detalhe (seção 🔍 Auditorias). Aba de Auditorias removida — tudo fica na task |
 | **📊 Scorecards** | Métricas por agente: first-pass rate, rework, scope creep, taxa de aprovação |
-| **🏢 Multi-projeto** | Suporte a múltiplos projetos simultâneos (oeste-gestao, control-tower-v2, agent-ops-workflow) |
+| **🏢 Multi-projeto** | Suporte a múltiplos projetos simultâneos (cada equipe/cliente tem seu próprio) |
 | **🔄 Scanner** | Lê PLANO.md + task_XX.md do planejamento diário → SQLite |
 | **📡 Event Hooks** | Recebe on_session_start / on_session_end dos gateways |
 | **🌐 GitHub Webhooks** | Sincroniza commits com tasks |
